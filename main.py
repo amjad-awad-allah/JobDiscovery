@@ -14,6 +14,7 @@ except Exception:
 
 from crawler import Crawler, normalize_domain, validate_url
 from database import (
+    DEFAULT_DB_PATH,
     delete_company,
     get_all_companies,
     get_all_jobs,
@@ -36,7 +37,7 @@ from scrapling import Selector
 
 def run_discovery(
     target_url: str,
-    db_path: str = "company_discovery.db",
+    db_path: str = DEFAULT_DB_PATH,
     max_pages: int = 20,
     check_dns: bool = True,
 ) -> int:
@@ -307,7 +308,7 @@ def display_company_card(company, show_jobs: bool = True) -> None:
     print("=" * 70)
 
 
-def handle_search_company(db_path: str = "company_discovery.db") -> None:
+def handle_search_company(db_path: str = DEFAULT_DB_PATH) -> None:
     """Prompt user for URL, domain, or company name and search database."""
     init_db(db_path)
     session = get_session(db_path)
@@ -426,7 +427,7 @@ def display_all_jobs_in_db(session, batch_size: int = 15) -> None:
     print("=" * 80)
 
 
-def handle_browse_database(db_path: str = "company_discovery.db") -> None:
+def handle_browse_database(db_path: str = DEFAULT_DB_PATH) -> None:
     """List all stored companies and provide clear sub-options to view jobs or company profiles."""
     init_db(db_path)
     session = get_session(db_path)
@@ -553,7 +554,7 @@ def handle_browse_database(db_path: str = "company_discovery.db") -> None:
         session.close()
 
 
-def interactive_menu(db_path: str = "company_discovery.db", max_pages: int = 20) -> None:
+def interactive_menu(db_path: str = DEFAULT_DB_PATH, max_pages: int = 20) -> None:
     """Run interactive console menu loop."""
     init_db(db_path)
 
@@ -657,8 +658,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--db",
-        default="company_discovery.db",
-        help="Path to the SQLite database file (default: company_discovery.db)",
+        default=DEFAULT_DB_PATH,
+        help=f"Path to the SQLite database file (default: {DEFAULT_DB_PATH})",
     )
     parser.add_argument(
         "--max-pages",

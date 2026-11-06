@@ -1,0 +1,40 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: job-discovery:latest
+    container_name: job-discovery-app
+    stdin_open: true
+    tty: true
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DB_PATH=/app/data/company_discovery.db
+    volumes:
+      - ./data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Service to run automated unit tests inside Docker
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: job-discovery:latest
+    profiles: ["test"]
+    environment:
+      - PYTHONUNBUFFERED=1
+    entrypoint: ["python"]
+    command: ["-m", "unittest", "test_discovery.py", "-v"]
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+

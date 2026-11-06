@@ -1,4 +1,5 @@
 """SQLite database operations and persistence for Company Discovery."""
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import create_engine, select
@@ -7,11 +8,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from models import Base, Company, CompanyPerson, JobPosting, utc_now
 
-DEFAULT_DB_PATH = "company_discovery.db"
+DEFAULT_DB_PATH = os.environ.get("DB_PATH", "company_discovery.db")
 
 
 def get_engine(db_path: str = DEFAULT_DB_PATH) -> Engine:
     """Create and return a SQLAlchemy SQLite engine."""
+    db_dir = os.path.dirname(db_path)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
     # check_same_thread=False allows SQLite to be used across threads if needed
     return create_engine(f"sqlite:///{db_path}", echo=False)
 

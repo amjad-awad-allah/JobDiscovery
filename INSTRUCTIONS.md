@@ -249,3 +249,37 @@ python -c "import sqlite3; conn = sqlite3.connect('company_discovery.db'); c = c
 ### 7.3 Graphical SQLite Viewers
 You can also open `company_discovery.db` with GUI tools such as **DB Browser for SQLite** or **VS Code SQLite Viewer Extension**.
 
+---
+
+## 8. Running with Docker & Docker Compose
+
+The application includes a production-grade multi-stage `Dockerfile` and `docker-compose.yml` for isolated containerized execution.
+
+### 8.1 Build the Docker Image
+Build the container image using Docker Compose:
+```powershell
+docker compose build
+```
+
+### 8.2 Launch the Interactive Menu in Docker
+Run the interactive console menu inside Docker with full terminal interactivity:
+```powershell
+docker compose run --rm app
+```
+
+### 8.3 Direct Scan with Docker
+Execute a direct discovery scan on any company website:
+```powershell
+docker compose run --rm app https://innotech-experts.de/
+```
+
+### 8.4 Run Automated Tests in Docker
+Execute the full test suite in an isolated container environment:
+```powershell
+docker compose run --rm tests
+```
+
+### 8.5 Data Persistence
+All containerized scans persist their database to `./data/company_discovery.db` on your host machine via Docker volume mounting.
+
+
