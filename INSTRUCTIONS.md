@@ -29,28 +29,42 @@ pip install -r requirements.txt
 
 ---
 
-## 2. Command-Line Usage
+## 2. Interactive Menu & Command-Line Usage
 
-### 2.1 Display Help
+### 2.1 Launching the Interactive Console Menu
+Run the application without arguments (or with `--menu`) to open the interactive menu:
+```powershell
+python main.py
+```
+
+Menu Interface:
+```text
+=======================================================
+              COMPANY & JOB DISCOVERY
+=======================================================
+  [1] New Scan (Enter Website URL)
+  [2] Search Database (By URL, Domain, or Name)
+  [3] Browse Database (List All Companies & Jobs)
+  [4] Exit
+=======================================================
+Select an option [1-4]: 
+```
+
+- **Option [1] New Scan:** Prompts you to enter a company website URL (e.g. `https://innotech-experts.de/`) and runs the full discovery scan.
+- **Option [2] Search Database:** Prompts for a URL or domain, finds the stored company record, and displays complete details and job postings.
+- **Option [3] Browse Database:** Displays a clean table of all stored companies, total job postings, and allows inspecting any company by ID.
+- **Option [4] Exit:** Closes the application.
+
+### 2.2 Direct Command-Line Execution
+You can still run scans directly by passing the target URL as an argument:
+```powershell
+python main.py https://innotech-experts.de/
+```
+
+### 2.3 Display Help
 To see all supported CLI options and flags:
 ```powershell
 python main.py --help
-```
-
-Output:
-```text
-usage: company-discovery [-h] [--db DB] [--max-pages MAX_PAGES] [url]
-
-Company & Job Discovery CLI: Automatically extract company and career details from websites.
-
-positional arguments:
-  url                   Target company website URL (e.g. https://www.example.de)
-
-options:
-  -h, --help            show this help message and exit
-  --db DB               Path to the SQLite database file (default: company_discovery.db)
-  --max-pages MAX_PAGES
-                        Maximum number of pages to visit (default: 20)
 ```
 
 ---

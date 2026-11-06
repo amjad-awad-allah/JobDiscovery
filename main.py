@@ -13,7 +13,16 @@ except Exception:
     pass
 
 from crawler import Crawler, normalize_domain, validate_url
-from database import get_session, init_db, save_or_update_company, save_or_update_jobs
+from database import (
+    get_all_companies,
+    get_company_by_id,
+    get_company_by_query,
+    get_database_stats,
+    get_session,
+    init_db,
+    save_or_update_company,
+    save_or_update_jobs,
+)
 from extractor import (
     extract_company_data,
     extract_job_postings,
@@ -194,6 +203,227 @@ def run_discovery(
         session.close()
 
 
+def display_company_card(company, show_jobs: bool = True) -> None:
+    """Format and display detailed information for a company and its jobs."""
+    print("\n" + "=" * 70)
+    print(f" COMPANY DETAILS: {company.name or company.domain}")
+    print("=" * 70)
+    print(f"ID:                  {company.id}")
+    print(f"Company Name:        {company.name or 'Not specified'}")
+    if company.legal_form:
+        print(f"Legal Form:          {company.legal_form}")
+    print(f"Domain:              {company.domain}")
+    print(f"Website URL:         {company.website_url}")
+    print(f"Impressum URL:       {company.impressum_url or 'Not found'}")
+
+    # Address
+    address_parts = []
+    if company.street:
+        addr = company.street
+        if company.house_number:
+            addr += f" {company.house_number}"
+        address_parts.append(addr)
+    if company.postal_code or company.city:
+        plz_city = f"{company.postal_code or ''} {company.city or ''}".strip()
+        address_parts.append(plz_city)
+    if company.country:
+        address_parts.append(company.country)
+    address_str = ", ".join(address_parts) if address_parts else "Not found"
+    print(f"Address:             {address_str}")
+
+    print(f"Email:               {company.email or 'Not found'}")
+    print(f"Phone:               {company.phone or 'Not found'}")
+    if company.fax:
+        print(f"Fax:                 {company.fax}")
+    print(f"VAT ID:              {company.vat_id or 'Not found'}")
+    if company.register_number:
+        court = f" ({company.register_court})" if company.register_court else ""
+        print(f"Commercial Register: {company.register_number}{court}")
+
+    # Representatives
+    if company.persons:
+        print("\nRepresentatives:")
+        for p in company.persons:
+            print(f"  • {p.first_name or ''} {p.last_name} ({p.role})")
+    else:
+        print("Representatives:     None recorded")
+
+    created_str = company.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") if company.created_at else "Unknown"
+    updated_str = company.updated_at.strftime("%Y-%m-%d %H:%M:%S UTC") if company.updated_at else "Unknown"
+    print(f"\nFirst Discovered:    {created_str}")
+    print(f"Last Updated:        {updated_str}")
+
+    # Jobs
+    if show_jobs:
+        jobs = company.jobs or []
+        print("\n" + "-" * 70)
+        print(f" JOB POSTINGS (Total: {len(jobs)})")
+        print("-" * 70)
+        if not jobs:
+            print("  No job postings recorded for this company.")
+        else:
+            limit = 10
+            for idx, job in enumerate(jobs[:limit], 1):
+                loc = f" | {job.location}" if job.location else ""
+                emp = f" | {job.employment_type}" if job.employment_type else ""
+                first_s = job.first_seen_at.strftime("%Y-%m-%d") if job.first_seen_at else ""
+                print(f"  [{idx}] {job.title}{loc}{emp}")
+                print(f"      URL: {job.url}")
+                if first_s:
+                    print(f"      First seen: {first_s}")
+            if len(jobs) > limit:
+                remaining = len(jobs) - limit
+                print(f"\n  ... and {remaining} more job postings.")
+                try:
+                    show_more = input(f"  View all remaining {remaining} jobs? [y/N]: ").strip().lower()
+                    if show_more == "y":
+                        for idx, job in enumerate(jobs[limit:], limit + 1):
+                            loc = f" | {job.location}" if job.location else ""
+                            emp = f" | {job.employment_type}" if job.employment_type else ""
+                            print(f"  [{idx}] {job.title}{loc}{emp}")
+                            print(f"      URL: {job.url}")
+                except (KeyboardInterrupt, EOFError):
+                    pass
+    print("=" * 70)
+
+
+def handle_search_company(db_path: str = "company_discovery.db") -> None:
+    """Prompt user for URL, domain, or company name and search database."""
+    init_db(db_path)
+    session = get_session(db_path)
+    try:
+        print("\n" + "=" * 60)
+        print(" [2] SEARCH IN DATABASE")
+        print("=" * 60)
+        query = input("Enter company website URL, domain, or name: ").strip()
+        if not query:
+            print("Search cancelled.")
+            return
+
+        company = get_company_by_query(session, query)
+        if company:
+            display_company_card(company, show_jobs=True)
+        else:
+            print(f"\nNo company found in database matching: '{query}'")
+            print("Tip: Use Option [1] to scan this website and add it to the database.")
+    finally:
+        session.close()
+
+
+def handle_browse_database(db_path: str = "company_discovery.db") -> None:
+    """List all stored companies in the database and allow inspection."""
+    init_db(db_path)
+    session = get_session(db_path)
+    try:
+        companies = get_all_companies(session)
+        stats = get_database_stats(session)
+
+        print("\n" + "=" * 80)
+        print(f" [3] STORED COMPANIES IN DATABASE ({stats['companies']} Companies | {stats['jobs']} Jobs)")
+        print("=" * 80)
+
+        if not companies:
+            print("The database is currently empty.")
+            print("Use Option [1] in the main menu to scan your first company website!")
+            print("=" * 80)
+            return
+
+        # Table header
+        print(f"{'ID':<4} | {'Domain':<26} | {'Company Name':<28} | {'City':<12} | {'Jobs':<5}")
+        print("-" * 80)
+
+        for c in companies:
+            c_id = str(c.id)
+            c_domain = (c.domain[:24] + "..") if len(c.domain) > 26 else c.domain
+            c_name = (c.name or "N/A")
+            c_name = (c_name[:26] + "..") if len(c_name) > 28 else c_name
+            c_city = (c.city or "-")[:12]
+            c_jobs = str(len(c.jobs or []))
+            print(f"{c_id:<4} | {c_domain:<26} | {c_name:<28} | {c_city:<12} | {c_jobs:<5}")
+
+        print("=" * 80)
+
+        try:
+            choice = input("\nEnter Company ID to view full details (or press Enter to return): ").strip()
+            if choice.isdigit():
+                c_id = int(choice)
+                company = get_company_by_id(session, c_id)
+                if company:
+                    display_company_card(company, show_jobs=True)
+                else:
+                    print(f"Company ID {c_id} not found.")
+        except (KeyboardInterrupt, EOFError):
+            pass
+    finally:
+        session.close()
+
+
+def interactive_menu(db_path: str = "company_discovery.db", max_pages: int = 20) -> None:
+    """Run interactive console menu loop."""
+    init_db(db_path)
+
+    while True:
+        print("\n" + "=" * 55)
+        print("              COMPANY & JOB DISCOVERY")
+        print("=======================================================")
+        print("  [1] New Scan (Enter Website URL)")
+        print("  [2] Search Database (By URL, Domain, or Name)")
+        print("  [3] Browse Database (List All Companies & Jobs)")
+        print("  [4] Exit")
+        print("=======================================================")
+
+        try:
+            choice = input("Select an option [1-4]: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\nExiting. Goodbye!")
+            break
+
+        if choice == "1":
+            print("\n" + "=" * 55)
+            print(" [1] NEW WEBSITE SCAN")
+            print("=" * 55)
+            try:
+                target_url = input("Enter company website URL (e.g. https://innotech-experts.de/): ").strip()
+            except (KeyboardInterrupt, EOFError):
+                break
+
+            if not target_url or target_url.lower() in ("back", "0", "exit", "cancel"):
+                print("Scan cancelled.")
+                continue
+
+            run_discovery(
+                target_url=target_url,
+                db_path=db_path,
+                max_pages=max_pages,
+                check_dns=True,
+            )
+            try:
+                input("\nPress Enter to return to menu...")
+            except (KeyboardInterrupt, EOFError):
+                pass
+
+        elif choice == "2":
+            handle_search_company(db_path=db_path)
+            try:
+                input("\nPress Enter to return to menu...")
+            except (KeyboardInterrupt, EOFError):
+                pass
+
+        elif choice == "3":
+            handle_browse_database(db_path=db_path)
+            try:
+                input("\nPress Enter to return to menu...")
+            except (KeyboardInterrupt, EOFError):
+                pass
+
+        elif choice in ("4", "q", "exit", "quit"):
+            print("\nThank you for using Company & Job Discovery. Goodbye!")
+            break
+
+        else:
+            print("\nInvalid selection. Please choose 1, 2, 3, or 4.")
+
+
 def main() -> None:
     """Parse command line arguments and execute discovery."""
     parser = argparse.ArgumentParser(
@@ -203,7 +433,7 @@ def main() -> None:
     parser.add_argument(
         "url",
         nargs="?",
-        help="Target company website URL (e.g. https://www.example.de)",
+        help="Target company website URL (e.g. https://innotech-experts.de/). If omitted, interactive menu opens.",
     )
     parser.add_argument(
         "--db",
@@ -216,20 +446,26 @@ def main() -> None:
         default=20,
         help="Maximum number of pages to visit (default: 20)",
     )
+    parser.add_argument(
+        "--menu",
+        action="store_true",
+        help="Launch the interactive console menu",
+    )
 
     args = parser.parse_args()
 
-    if not args.url:
-        parser.print_help()
-        sys.exit(1)
-
-    exit_code = run_discovery(
-        target_url=args.url,
-        db_path=args.db,
-        max_pages=args.max_pages,
-        check_dns=True,
-    )
-    sys.exit(exit_code)
+    # If URL is supplied directly via CLI, run scan directly
+    if args.url and not args.menu:
+        exit_code = run_discovery(
+            target_url=args.url,
+            db_path=args.db,
+            max_pages=args.max_pages,
+            check_dns=True,
+        )
+        sys.exit(exit_code)
+    else:
+        # Otherwise, launch the interactive menu
+        interactive_menu(db_path=args.db, max_pages=args.max_pages)
 
 
 if __name__ == "__main__":

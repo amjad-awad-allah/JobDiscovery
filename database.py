@@ -177,3 +177,56 @@ def save_or_update_jobs(
     session.commit()
     return created_count, updated_count
 
+
+def get_company_by_query(session: Session, query: str) -> Optional[Company]:
+    """Search for a company by URL, domain, or name."""
+    clean_q = query.strip()
+    if not clean_q:
+        return None
+
+    from crawler import normalize_domain
+
+    # 1. Match by normalized domain
+    domain = normalize_domain(clean_q)
+    if domain:
+        stmt = select(Company).where(Company.domain == domain)
+        company = session.execute(stmt).scalar_one_or_none()
+        if company:
+            return company
+
+    # 2. Match substring in domain, website_url, or name
+    stmt = select(Company).where(
+        (Company.domain.ilike(f"%{clean_q}%"))
+        | (Company.website_url.ilike(f"%{clean_q}%"))
+        | (Company.name.ilike(f"%{clean_q}%"))
+    )
+    return session.execute(stmt).scalars().first()
+
+
+def get_all_companies(session: Session) -> List[Company]:
+    """Retrieve all companies ordered by ID."""
+    stmt = select(Company).order_by(Company.id)
+    return list(session.execute(stmt).scalars().all())
+
+
+def get_company_by_id(session: Session, company_id: int) -> Optional[Company]:
+    """Retrieve a company by its primary key ID."""
+    stmt = select(Company).where(Company.id == company_id)
+    return session.execute(stmt).scalar_one_or_none()
+
+
+def get_database_stats(session: Session) -> Dict[str, int]:
+    """Return summary counts of companies, jobs, and representatives."""
+    from sqlalchemy import func
+
+    companies_count = session.scalar(select(func.count()).select_from(Company)) or 0
+    jobs_count = session.scalar(select(func.count()).select_from(JobPosting)) or 0
+    persons_count = session.scalar(select(func.count()).select_from(CompanyPerson)) or 0
+
+    return {
+        "companies": companies_count,
+        "jobs": jobs_count,
+        "persons": persons_count,
+    }
+
+
