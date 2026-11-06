@@ -230,3 +230,10 @@ def get_database_stats(session: Session) -> Dict[str, int]:
     }
 
 
+def get_all_jobs(session: Session) -> List[JobPosting]:
+    """Retrieve all job postings across all companies."""
+    stmt = select(JobPosting).order_by(JobPosting.company_id, JobPosting.id)
+    return list(session.execute(stmt).scalars().all())
+
+
+

@@ -52,7 +52,10 @@ Select an option [1-4]:
 
 - **Option [1] New Scan:** Prompts you to enter a company website URL (e.g. `https://innotech-experts.de/`) and runs the full discovery scan.
 - **Option [2] Search Database:** Prompts for a URL or domain, finds the stored company record, and displays complete details and job postings.
-- **Option [3] Browse Database:** Displays a clean table of all stored companies, total job postings, and allows inspecting any company by ID.
+- **Option [3] Browse Database:** Displays a clean summary table of all stored companies and their job counts, with interactive sub-options to:
+  - `[1] View Job Postings for a Company`: Paginated view of all job advertisements (title, location, type, dates, and direct URL) for any selected company ID.
+  - `[2] View Full Company Profile`: Complete Impressum, contact details, address, legal representatives, and jobs.
+  - `[3] View All Jobs in Database`: View all job postings across all scanned companies.
 - **Option [4] Exit:** Closes the application.
 
 ### 2.2 Direct Command-Line Execution

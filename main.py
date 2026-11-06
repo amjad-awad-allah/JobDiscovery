@@ -15,6 +15,7 @@ except Exception:
 from crawler import Crawler, normalize_domain, validate_url
 from database import (
     get_all_companies,
+    get_all_jobs,
     get_company_by_id,
     get_company_by_query,
     get_database_stats,
@@ -310,8 +311,104 @@ def handle_search_company(db_path: str = "company_discovery.db") -> None:
         session.close()
 
 
+def display_company_jobs(company, batch_size: int = 15) -> None:
+    """Display all job postings for a specific company with clean pagination."""
+    jobs = company.jobs or []
+    print("\n" + "=" * 80)
+    print(f" JOB POSTINGS FOR: {company.name or company.domain}")
+    print(f" Domain: {company.domain} | Total Jobs: {len(jobs)}")
+    print("=" * 80)
+
+    if not jobs:
+        print("  No job advertisements found for this company.")
+        print("=" * 80)
+        return
+
+    total = len(jobs)
+    current_idx = 0
+
+    while current_idx < total:
+        end_idx = min(current_idx + batch_size, total)
+        for i in range(current_idx, end_idx):
+            job = jobs[i]
+            loc_str = f" | Location: {job.location}" if job.location else ""
+            emp_str = f" | Type: {job.employment_type}" if job.employment_type else ""
+            first_s = f" | First seen: {job.first_seen_at.strftime('%Y-%m-%d')}" if job.first_seen_at else ""
+            last_s = f" | Last seen: {job.last_seen_at.strftime('%Y-%m-%d')}" if job.last_seen_at else ""
+
+            print(f"\n  [{i + 1}/{total}] {job.title}")
+            details = f"{loc_str.lstrip(' |')}{emp_str}{first_s}{last_s}"
+            if details:
+                print(f"      {details}")
+            print(f"      URL: {job.url}")
+
+        current_idx = end_idx
+        if current_idx < total:
+            remaining = total - current_idx
+            try:
+                prompt = f"\n  --- Showing {current_idx} of {total} jobs. Press Enter for next {min(batch_size, remaining)} (or 'a' for all, 'q' to stop): "
+                nav = input(prompt).strip().lower()
+                if nav == "q":
+                    break
+                elif nav == "a":
+                    batch_size = total
+            except (KeyboardInterrupt, EOFError):
+                break
+        else:
+            print("\n  --- End of job listings ---")
+
+    print("=" * 80)
+
+
+def display_all_jobs_in_db(session, batch_size: int = 15) -> None:
+    """Display all job postings across all companies in database."""
+    all_jobs = get_all_jobs(session)
+    print("\n" + "=" * 80)
+    print(f" ALL JOB POSTINGS IN DATABASE (Total: {len(all_jobs)} jobs)")
+    print("=" * 80)
+
+    if not all_jobs:
+        print("  No job advertisements stored in the database.")
+        print("=" * 80)
+        return
+
+    total = len(all_jobs)
+    current_idx = 0
+
+    while current_idx < total:
+        end_idx = min(current_idx + batch_size, total)
+        for i in range(current_idx, end_idx):
+            job = all_jobs[i]
+            comp_label = job.company.name if job.company and job.company.name else (job.company.domain if job.company else f"Company #{job.company_id}")
+            loc_str = f" | {job.location}" if job.location else ""
+            emp_str = f" | {job.employment_type}" if job.employment_type else ""
+
+            print(f"\n  [{i + 1}/{total}] {job.title}  [{comp_label}]")
+            details = f"{loc_str.lstrip(' |')}{emp_str}"
+            if details:
+                print(f"      {details}")
+            print(f"      URL: {job.url}")
+
+        current_idx = end_idx
+        if current_idx < total:
+            remaining = total - current_idx
+            try:
+                prompt = f"\n  --- Showing {current_idx} of {total} jobs. Press Enter for next {min(batch_size, remaining)} (or 'a' for all, 'q' to stop): "
+                nav = input(prompt).strip().lower()
+                if nav == "q":
+                    break
+                elif nav == "a":
+                    batch_size = total
+            except (KeyboardInterrupt, EOFError):
+                break
+        else:
+            print("\n  --- End of job listings ---")
+
+    print("=" * 80)
+
+
 def handle_browse_database(db_path: str = "company_discovery.db") -> None:
-    """List all stored companies in the database and allow inspection."""
+    """List all stored companies and provide clear sub-options to view jobs or company profiles."""
     init_db(db_path)
     session = get_session(db_path)
     try:
@@ -319,7 +416,7 @@ def handle_browse_database(db_path: str = "company_discovery.db") -> None:
         stats = get_database_stats(session)
 
         print("\n" + "=" * 80)
-        print(f" [3] STORED COMPANIES IN DATABASE ({stats['companies']} Companies | {stats['jobs']} Jobs)")
+        print(f" [3] BROWSE DATABASE ({stats['companies']} Companies | {stats['jobs']} Jobs)")
         print("=" * 80)
 
         if not companies:
@@ -332,7 +429,9 @@ def handle_browse_database(db_path: str = "company_discovery.db") -> None:
         print(f"{'ID':<4} | {'Domain':<26} | {'Company Name':<28} | {'City':<12} | {'Jobs':<5}")
         print("-" * 80)
 
+        company_ids = set()
         for c in companies:
+            company_ids.add(c.id)
             c_id = str(c.id)
             c_domain = (c.domain[:24] + "..") if len(c.domain) > 26 else c.domain
             c_name = (c.name or "N/A")
@@ -343,17 +442,74 @@ def handle_browse_database(db_path: str = "company_discovery.db") -> None:
 
         print("=" * 80)
 
+        print("\nWhat would you like to view?")
+        print("  [1] View Job Postings for a Company (Select by ID)")
+        print("  [2] View Full Company Profile & Impressum Info (Select by ID)")
+        print("  [3] View All Jobs in the Database")
+        print("  [Enter] Return to Main Menu")
+        print("-" * 80)
+
         try:
-            choice = input("\nEnter Company ID to view full details (or press Enter to return): ").strip()
-            if choice.isdigit():
-                c_id = int(choice)
-                company = get_company_by_id(session, c_id)
-                if company:
-                    display_company_card(company, show_jobs=True)
-                else:
-                    print(f"Company ID {c_id} not found.")
+            choice = input("Select an option [1-3] or press Enter to return: ").strip()
         except (KeyboardInterrupt, EOFError):
-            pass
+            return
+
+        if not choice:
+            return
+
+        # If user picked Option 1 (View jobs for a company)
+        if choice == "1":
+            try:
+                sub_id = input(f"Enter Company ID to view its jobs [{', '.join(str(i) for i in sorted(company_ids))}]: ").strip()
+                if not sub_id:
+                    return
+                if sub_id.isdigit():
+                    company = get_company_by_id(session, int(sub_id))
+                    if company:
+                        display_company_jobs(company)
+                    else:
+                        print(f"Company ID {sub_id} not found.")
+                else:
+                    company = get_company_by_query(session, sub_id)
+                    if company:
+                        display_company_jobs(company)
+                    else:
+                        print(f"No company found matching '{sub_id}'.")
+            except (KeyboardInterrupt, EOFError):
+                return
+
+        # If user picked Option 2 (View full company profile)
+        elif choice == "2":
+            try:
+                sub_id = input(f"Enter Company ID to view full details [{', '.join(str(i) for i in sorted(company_ids))}]: ").strip()
+                if not sub_id:
+                    return
+                if sub_id.isdigit():
+                    company = get_company_by_id(session, int(sub_id))
+                    if company:
+                        display_company_card(company, show_jobs=True)
+                    else:
+                        print(f"Company ID {sub_id} not found.")
+                else:
+                    company = get_company_by_query(session, sub_id)
+                    if company:
+                        display_company_card(company, show_jobs=True)
+                    else:
+                        print(f"No company found matching '{sub_id}'.")
+            except (KeyboardInterrupt, EOFError):
+                return
+
+        # If user picked Option 3 (View all jobs across all companies)
+        elif choice == "3":
+            display_all_jobs_in_db(session)
+
+        # Or if user typed a company query or domain directly
+        else:
+            company = get_company_by_query(session, choice)
+            if company:
+                display_company_jobs(company)
+            else:
+                print("Invalid selection.")
     finally:
         session.close()
 
