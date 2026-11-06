@@ -90,26 +90,47 @@ def save_or_update_company(
         session.flush()
 
     # Synchronize company persons
-    if persons_data:
+    if persons_data is not None:
+        normalized_new = []
         for p_data in persons_data:
             last_name = p_data.get("last_name", "").strip()
             role = p_data.get("role", "Representative").strip()
             first_name = p_data.get("first_name", "").strip() or None
-            if not last_name:
-                continue
+            if last_name:
+                normalized_new.append({
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "role": role,
+                })
 
-            # Check if this person already exists for this company
-            person_exists = any(
-                p.last_name.lower() == last_name.lower()
-                and (p.first_name or "").lower() == (first_name or "").lower()
-                for p in company.persons
+        # Remove existing persons who are NOT in the new extracted list
+        for existing in list(company.persons):
+            matched = any(
+                existing.last_name.lower() == p["last_name"].lower()
+                and (existing.first_name or "").lower() == (p["first_name"] or "").lower()
+                for p in normalized_new
             )
-            if not person_exists:
+            if not matched:
+                session.delete(existing)
+
+        # Update existing persons or add new ones
+        for p in normalized_new:
+            existing_p = next(
+                (
+                    ep for ep in company.persons
+                    if ep.last_name.lower() == p["last_name"].lower()
+                    and (ep.first_name or "").lower() == (p["first_name"] or "").lower()
+                ),
+                None,
+            )
+            if existing_p:
+                existing_p.role = p["role"]
+            else:
                 new_person = CompanyPerson(
                     company_id=company.id,
-                    first_name=first_name,
-                    last_name=last_name,
-                    role=role,
+                    first_name=p["first_name"],
+                    last_name=p["last_name"],
+                    role=p["role"],
                 )
                 session.add(new_person)
 
@@ -117,29 +138,51 @@ def save_or_update_company(
     return company, is_created
 
 
+class JobSyncResult(tuple):
+    """
+    Tuple representing (created_count, updated_count) with an optional deleted attribute.
+    Maintains complete backwards compatibility with tuple unpacking:
+        created, updated = save_or_update_jobs(...)
+    """
+    def __new__(cls, created: int, updated: int, deleted: int = 0):
+        return super().__new__(cls, (created, updated))
+
+    def __init__(self, created: int, updated: int, deleted: int = 0):
+        self.created = created
+        self.updated = updated
+        self.deleted = deleted
+
+
 def save_or_update_jobs(
     session: Session,
     company_id: int,
     jobs_data: List[Dict[str, Any]],
+    prune_missing: bool = False,
 ) -> Tuple[int, int]:
     """
     Save or update discovered job postings for a company.
     
     Prevents duplicate job listings using (company_id, normalized_url).
     Preserves original first_seen_at and updates last_seen_at.
+    If prune_missing is True, any existing job for this company that does not
+    appear in jobs_data is deleted from the database.
     
     Returns:
-        (created_count, updated_count)
+        JobSyncResult(created_count, updated_count, deleted_count)
     """
     created_count = 0
     updated_count = 0
+    deleted_count = 0
     now = utc_now()
+    active_urls = set()
 
     for job in jobs_data:
         raw_url = job.get("url", "").strip()
         title = job.get("title", "").strip()
         if not raw_url or not title:
             continue
+
+        active_urls.add(raw_url)
 
         stmt = select(JobPosting).where(
             JobPosting.company_id == company_id,
@@ -174,8 +217,27 @@ def save_or_update_jobs(
             existing_job.last_seen_at = now
             updated_count += 1
 
+    if prune_missing:
+        # Delete old jobs for this company that no longer appear in jobs_data
+        stmt_existing = select(JobPosting).where(JobPosting.company_id == company_id)
+        existing_db_jobs = list(session.execute(stmt_existing).scalars().all())
+        for old_job in existing_db_jobs:
+            if old_job.url not in active_urls:
+                session.delete(old_job)
+                deleted_count += 1
+
     session.commit()
-    return created_count, updated_count
+    return JobSyncResult(created_count, updated_count, deleted_count)
+
+
+def delete_company(session: Session, company_id: int) -> bool:
+    """Delete a company and cascade-delete all its associated persons and jobs."""
+    company = get_company_by_id(session, company_id)
+    if not company:
+        return False
+    session.delete(company)
+    session.commit()
+    return True
 
 
 def get_company_by_query(session: Session, query: str) -> Optional[Company]:

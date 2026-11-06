@@ -22,7 +22,7 @@ from extractor import (
     find_career_url,
     find_impressum_url,
 )
-from models import Base, Company, JobPosting
+from models import Base, Company, CompanyPerson, JobPosting
 from scrapling import Selector
 
 # Synthetic HTML Fixtures
@@ -467,6 +467,93 @@ class TestCompanyDiscovery(unittest.TestCase):
         self.assertEqual(len(jobs), 1)
         self.assertEqual(jobs[0]["url"], "https://company.de/jobs/python-dev")
         self.assertEqual(jobs[0]["title"], "Python Developer (m/w/d)")
+
+    # 16. Representative synchronization deletes obsolete persons
+    def test_16_representative_synchronization_deletes_obsolete(self):
+        from database import delete_company
+        company_data = {
+            "domain": "sync-test.de",
+            "website_url": "https://sync-test.de",
+            "name": "Sync Test GmbH",
+        }
+        # First scan with an invalid/obsolete representative
+        reps_batch1 = [
+            {"first_name": "Stephan", "last_name": "Müller", "role": "Managing Director"},
+            {"first_name": "Sitz:", "last_name": "Karlsruhe", "role": "Managing Director"},
+        ]
+        c1, _ = save_or_update_company(self.session, company_data, reps_batch1)
+        self.assertEqual(len(c1.persons), 2)
+
+        # Second scan with cleaned/updated representatives
+        reps_batch2 = [
+            {"first_name": "Stephan", "last_name": "Müller", "role": "Managing Director"},
+            {"first_name": "Tobias", "last_name": "Joch", "role": "Managing Director"},
+        ]
+        c2, _ = save_or_update_company(self.session, company_data, reps_batch2)
+
+        # Verify obsolete "Sitz: Karlsruhe" was removed and replaced
+        person_names = [f"{p.first_name or ''} {p.last_name}".strip() for p in c2.persons]
+        self.assertEqual(len(person_names), 2)
+        self.assertIn("Stephan Müller", person_names)
+        self.assertIn("Tobias Joch", person_names)
+        self.assertNotIn("Sitz: Karlsruhe", person_names)
+
+    # 17. Job synchronization prunes obsolete jobs when website updates
+    def test_17_job_synchronization_prunes_removed_jobs(self):
+        company_data = {
+            "domain": "job-sync-test.de",
+            "website_url": "https://job-sync-test.de",
+            "name": "Job Sync Test GmbH",
+        }
+        company, _ = save_or_update_company(self.session, company_data)
+
+        # Batch 1: 3 jobs
+        batch1 = [
+            {"title": "Job A", "url": "https://job-sync-test.de/jobs/a"},
+            {"title": "Job B", "url": "https://job-sync-test.de/jobs/b"},
+            {"title": "Job C", "url": "https://job-sync-test.de/jobs/c"},
+        ]
+        save_or_update_jobs(self.session, company.id, batch1)
+        self.assertEqual(self.session.query(JobPosting).filter_by(company_id=company.id).count(), 3)
+
+        # Batch 2: Job B and C removed, Job D added
+        batch2 = [
+            {"title": "Job A (Updated)", "url": "https://job-sync-test.de/jobs/a"},
+            {"title": "Job D (New)", "url": "https://job-sync-test.de/jobs/d"},
+        ]
+        res = save_or_update_jobs(self.session, company.id, batch2, prune_missing=True)
+        self.assertEqual(res.created, 1)
+        self.assertEqual(res.updated, 1)
+        self.assertEqual(res.deleted, 2)
+
+        remaining_urls = [j.url for j in self.session.query(JobPosting).filter_by(company_id=company.id).all()]
+        self.assertEqual(len(remaining_urls), 2)
+        self.assertIn("https://job-sync-test.de/jobs/a", remaining_urls)
+        self.assertIn("https://job-sync-test.de/jobs/d", remaining_urls)
+        self.assertNotIn("https://job-sync-test.de/jobs/b", remaining_urls)
+        self.assertNotIn("https://job-sync-test.de/jobs/c", remaining_urls)
+
+    # 18. Cascade delete company
+    def test_18_cascade_delete_company(self):
+        from database import delete_company
+        company_data = {
+            "domain": "delete-me.de",
+            "website_url": "https://delete-me.de",
+            "name": "Delete Me GmbH",
+        }
+        reps = [{"first_name": "Max", "last_name": "Mustermann", "role": "CEO"}]
+        c, _ = save_or_update_company(self.session, company_data, reps)
+        save_or_update_jobs(self.session, c.id, [{"title": "Test Job", "url": "https://delete-me.de/job/1"}])
+
+        c_id = c.id
+        self.assertEqual(self.session.query(CompanyPerson).filter_by(company_id=c_id).count(), 1)
+        self.assertEqual(self.session.query(JobPosting).filter_by(company_id=c_id).count(), 1)
+
+        success = delete_company(self.session, c_id)
+        self.assertTrue(success)
+        self.assertIsNone(self.session.query(Company).filter_by(id=c_id).first())
+        self.assertEqual(self.session.query(CompanyPerson).filter_by(company_id=c_id).count(), 0)
+        self.assertEqual(self.session.query(JobPosting).filter_by(company_id=c_id).count(), 0)
 
 
 if __name__ == "__main__":

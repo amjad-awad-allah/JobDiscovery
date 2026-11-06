@@ -14,6 +14,7 @@ except Exception:
 
 from crawler import Crawler, normalize_domain, validate_url
 from database import (
+    delete_company,
     get_all_companies,
     get_all_jobs,
     get_company_by_id,
@@ -146,6 +147,7 @@ def run_discovery(
     discovered_jobs: List[Dict[str, Any]] = []
 
     if career_url:
+        career_page_inspected = False
         if is_external:
             print(f"Career page: FOUND (External Portal: {career_url})")
             print("Notice: External portal extraction is out of scope for this PoC.")
@@ -153,12 +155,14 @@ def run_discovery(
             print(f"Career page: FOUND ({career_url})")
             career_resp = crawler.fetch(career_url)
             if career_resp and career_resp.status < 400:
+                career_page_inspected = True
                 discovered_jobs = extract_job_postings(
                     selector=career_resp,
                     career_url=career_url,
                     base_domain=crawler.base_domain,
                 )
     else:
+        career_page_inspected = False
         print("Career page: NOT FOUND")
 
     print(f"Jobs discovered: {len(discovered_jobs)}")
@@ -180,18 +184,33 @@ def run_discovery(
             company_data=company_data,
             persons_data=persons_data,
         )
-        action_str = "saved successfully." if is_created else "updated successfully."
+        action_str = "saved successfully." if is_created else "updated & synchronized successfully."
         print(f"Company {action_str}")
 
-        created_jobs, updated_jobs = save_or_update_jobs(
+        jobs_res = save_or_update_jobs(
             session=session,
             company_id=company_obj.id,
             jobs_data=discovered_jobs,
+            prune_missing=career_page_inspected,
         )
-        if discovered_jobs:
-            print(f"{created_jobs} new job postings saved, {updated_jobs} existing job postings updated.")
+        created_jobs = jobs_res[0]
+        updated_jobs = jobs_res[1]
+        deleted_jobs = getattr(jobs_res, "deleted", 0)
+
+        parts = []
+        if created_jobs > 0:
+            parts.append(f"{created_jobs} new job postings saved")
+        if updated_jobs > 0:
+            parts.append(f"{updated_jobs} existing job postings updated")
+        if deleted_jobs > 0:
+            parts.append(f"{deleted_jobs} obsolete job postings removed")
+
+        if parts:
+            print(", ".join(parts) + ".")
+        elif discovered_jobs:
+            print("All job postings are up to date.")
         else:
-            print("No new job postings to save.")
+            print("No job postings to save.")
 
         print("\nScan completed.")
         print("========================================")
@@ -446,11 +465,12 @@ def handle_browse_database(db_path: str = "company_discovery.db") -> None:
         print("  [1] View Job Postings for a Company (Select by ID)")
         print("  [2] View Full Company Profile & Impressum Info (Select by ID)")
         print("  [3] View All Jobs in the Database")
+        print("  [4] Delete a Company & All its Data (Select by ID)")
         print("  [Enter] Return to Main Menu")
         print("-" * 80)
 
         try:
-            choice = input("Select an option [1-3] or press Enter to return: ").strip()
+            choice = input("Select an option [1-4] or press Enter to return: ").strip()
         except (KeyboardInterrupt, EOFError):
             return
 
@@ -503,6 +523,25 @@ def handle_browse_database(db_path: str = "company_discovery.db") -> None:
         elif choice == "3":
             display_all_jobs_in_db(session)
 
+        # If user picked Option 4 (Delete company)
+        elif choice == "4":
+            try:
+                sub_id = input(f"Enter Company ID to DELETE [{', '.join(str(i) for i in sorted(company_ids))}]: ").strip()
+                if not sub_id:
+                    return
+                company = get_company_by_id(session, int(sub_id)) if sub_id.isdigit() else get_company_by_query(session, sub_id)
+                if not company:
+                    print(f"Company '{sub_id}' not found.")
+                    return
+                confirm = input(f"Are you sure you want to delete '{company.name or company.domain}' and all its jobs? (y/N): ").strip().lower()
+                if confirm in ("y", "yes"):
+                    delete_company(session, company.id)
+                    print(f"Company '{company.domain}' and associated data successfully deleted.")
+                else:
+                    print("Deletion cancelled.")
+            except (KeyboardInterrupt, EOFError):
+                return
+
         # Or if user typed a company query or domain directly
         else:
             company = get_company_by_query(session, choice)
@@ -546,6 +585,31 @@ def interactive_menu(db_path: str = "company_discovery.db", max_pages: int = 20)
             if not target_url or target_url.lower() in ("back", "0", "exit", "cancel"):
                 print("Scan cancelled.")
                 continue
+
+            # Check if company already exists in database
+            target_domain = normalize_domain(target_url)
+            session = get_session(db_path)
+            existing = get_company_by_query(session, target_domain) if target_domain else None
+            session.close()
+
+            if existing:
+                print(f"\nNotice: Company '{existing.name or existing.domain}' already exists in database.")
+                print("  [1] Rescan & Synchronize (Update details, remove obsolete jobs/persons, keep history) [Default]")
+                print("  [2] Fresh Scan (Delete old company record and scan completely from scratch)")
+                print("  [3] Cancel")
+                try:
+                    rescan_mode = input("Select an option [1-3, Enter=1]: ").strip()
+                except (KeyboardInterrupt, EOFError):
+                    continue
+
+                if rescan_mode == "2":
+                    session = get_session(db_path)
+                    delete_company(session, existing.id)
+                    session.close()
+                    print(f"Cleared previous records for '{existing.domain}'. Starting fresh scan...")
+                elif rescan_mode in ("3", "c", "cancel"):
+                    print("Scan cancelled.")
+                    continue
 
             run_discovery(
                 target_url=target_url,

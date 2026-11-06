@@ -56,6 +56,7 @@ Select an option [1-4]:
   - `[1] View Job Postings for a Company`: Paginated view of all job advertisements (title, location, type, dates, and direct URL) for any selected company ID.
   - `[2] View Full Company Profile`: Complete Impressum, contact details, address, legal representatives, and jobs.
   - `[3] View All Jobs in Database`: View all job postings across all scanned companies.
+  - `[4] Delete Company & Data`: Permanently delete a company and cascade-delete its jobs and representatives.
 - **Option [4] Exit:** Closes the application.
 
 ### 2.2 Direct Command-Line Execution
